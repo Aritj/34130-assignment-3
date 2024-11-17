@@ -42,14 +42,6 @@ The assignment is divided into two main exercises:
    - Comparison of channel performance
    - System optimization suggestions
 
-## Key Parameters
-- Baud Rate: 10 Gbaud
-- Channel Spacing: 50 GHz
-- Number of Channels: 5
-- Samples per Symbol: 64
-- Symbol Count: 10⁵
-- OSNR Range: 4-16 dB
-
 ## Code Structure
 - `q1_1.py`: Basic signal generation and noise addition
 - `q1_2.py`: Optical filtering implementation
