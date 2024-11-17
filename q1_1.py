@@ -1,76 +1,143 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Step 1: Set up simulation parameters
-Nss = 64  # Number of samples per symbol
-Rb = 10e9  # Baud rate (10 Gbaud)
-Nsym = 1000  # Number of symbols
-Fs = Nss * Rb  # Sampling frequency
-Ts = 1 / Rb  # Symbol period
-T_total = Nsym * Ts  # Total simulation time
-N_total = int(Fs * T_total)  # Total number of samples
-t = np.linspace(0, T_total, N_total, endpoint=False)  # Time grid
-
-# Step 2: Initialize random number generator and generate OOK signal
-np.random.seed(34310)  # Seed for reproducibility
-symbols = np.random.choice([0, 1], Nsym)  # Generate random binary symbols
-ook_signal = np.repeat(symbols, Nss)  # NRZ pulse shaping (repeat each symbol Nss times)
-
-# Step 3: Add optical noise to the OOK signal
-OSNR_dB = 20  # Optical signal-to-noise ratio in dB
-OSNR_linear = 10 ** (OSNR_dB / 10)  # Convert OSNR to linear scale
-P_signal = np.mean(ook_signal**2)  # Calculate signal power
-B_ref = 12.5e9  # Reference bandwidth (~12.5 GHz)
-N_ASE = P_signal / (2 * B_ref * OSNR_linear)  # Noise power spectral density
-P_noise = N_ASE * Fs  # Total noise power
-
-# Generate complex AWGN
-sigma = np.sqrt(P_noise / 2)  # Standard deviation of noise
-noise = sigma * (
-    np.random.randn(len(ook_signal)) + 1j * np.random.randn(len(ook_signal))
-)
-noisy_signal = ook_signal + np.real(noise)  # Add noise to the real part of the signal
-
-# Mark signal and noise levels
-signal_level = 10 * np.log10(P_signal)
-noise_level = 10 * np.log10(P_noise)
-
-# Change number of samples per symbol and observe effects
-Nss_new = 32  # Updated number of samples per symbol
-Fs_new = Nss_new * Rb
-T_total_new = Nsym * Ts
-N_total_new = int(Fs_new * T_total_new)
-t_new = np.linspace(0, T_total_new, N_total_new, endpoint=False)
-ook_signal_new = np.repeat(symbols, Nss_new)
-
-# Generate new noisy signal
-P_signal_new = np.mean(ook_signal_new**2)
-N_ASE_new = P_signal_new / (2 * B_ref * OSNR_linear)
-P_noise_new = N_ASE_new * Fs_new
-sigma_new = np.sqrt(P_noise_new / 2)
-noise_new = sigma_new * (
-    np.random.randn(len(ook_signal_new)) + 1j * np.random.randn(len(ook_signal_new))
-)
-noisy_signal_new = ook_signal_new + np.real(noise_new)
+seed = 34310
+np.random.seed(seed)  # Set seed for reproducability
 
 
-# Plot Power Spectral Density (PSD) of OOK signal
-def plot_psd(signal, fs, title):
-    f, Pxx = plt.psd(signal, NFFT=1024, Fs=fs, scale_by_freq=False)
-    plt.title(title)
-    plt.xlabel("Frequency (Hz)")
-    plt.ylabel("Power/Frequency (dB/Hz)")
+# Module for configuration and results storage
+class SimulationConfig:
+    def __init__(self):
+        self.N_samples_per_symbol = 64
+        self.baud_rate = 10e9  # 10 Gbaud
+        self.N_symbols = 1000
+        self.OSNR_dB = 20  # OSNR in dB
+
+
+class SimulationResults:
+    def __init__(self):
+        self.time = None
+        self.signal = None
+        self.signal_power = None
+        self.noise_power = None
+        self.noisy_signal = None
+        self.psd_original = None
+        self.psd_noisy = None
+
+
+# Function to generate an OOK signal with NRZ pulse shaping
+def generate_OOK_signal(config: SimulationConfig):
+    bits = np.random.randint(0, 2, config.N_symbols)
+    N_samples = config.N_samples_per_symbol * config.N_symbols
+    signal = np.repeat(bits, config.N_samples_per_symbol)
+    time = np.linspace(
+        0, config.N_symbols / config.baud_rate, N_samples, endpoint=False
+    )
+    return time, signal, bits
+
+
+# Function to calculate signal power
+def calculate_signal_power(signal):
+    return np.mean(np.abs(signal) ** 2)
+
+
+# Function to add AWGN to the signal
+def add_awgn(signal, signal_power, config):
+    OSNR_linear = 10 ** (config.OSNR_dB / 10)
+    noise_power = signal_power / OSNR_linear
+    noise_variance = noise_power / 2
+    noise = np.sqrt(noise_variance) * (
+        np.random.randn(len(signal)) + 1j * np.random.randn(len(signal))
+    )
+    return signal + noise
+
+
+# Function to compute the Power Spectral Density (PSD)
+def compute_psd(signal, sampling_rate):
+    fft_signal = np.fft.fftshift(np.fft.fft(signal))
+    psd = np.abs(fft_signal) ** 2 / len(signal)
+    freqs = np.fft.fftshift(np.fft.fftfreq(len(signal), 1 / sampling_rate))
+    return freqs, 10 * np.log10(psd)
+
+
+def plot_signal(results: SimulationResults, config: SimulationConfig):
+    plt.figure()
+    plt.plot(results.time * 1e9, results.signal, label="NRZ OOK signal")
+    plt.xlabel("Time (ns)")
+    plt.ylabel("Amplitude")
+    plt.title("Pulse-shaped OOK Signal")
+    plt.legend()
+    plt.grid()
+    plt.xlim(0, 1e9 * 10 / (config.baud_rate))
     plt.show()
 
 
-if __name__ == "__main__":
-    plot_psd(ook_signal, Fs, "PSD of OOK Signal")
-    plot_psd(noisy_signal, Fs, "PSD of Noisy OOK Signal")
-    print(f"Signal Level: {signal_level:.2f} dB")
-    print(f"Noise Level: {noise_level:.2f} dB")
-    plot_psd(ook_signal_new, Fs_new, "PSD of OOK Signal (Nss=32)")
-    plot_psd(noisy_signal_new, Fs_new, "PSD of Noisy OOK Signal (Nss=32)")
+# Function to plot results
+def plot_psd_with_levels(freqs, psd, signal_power, noise_power, title):
+    plt.figure()
+    plt.plot(freqs, psd, label="PSD")
+    plt.axhline(
+        10 * np.log10(signal_power), color="g", linestyle="--", label="Signal Level"
+    )
+    plt.axhline(
+        10 * np.log10(noise_power), color="r", linestyle="--", label="Noise Level"
+    )
+    plt.title(title)
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("PSD (dB/Hz)")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
-    # Compare observations and answer questions
-    # print("Out-of-band noise level is dependent on the sampling rate (Nss).")
-    # print("OSNR primarily refers to in-band signal-to-noise ratio.")
+
+def calculate_and_plot_PSD(config: SimulationConfig, results: SimulationResults):
+    # Generate and plot OOK signal
+    results.time, results.signal, bits = generate_OOK_signal(config)
+    plot_signal(results, config)
+
+    # Computer signal and noise power
+    results.signal_power = calculate_signal_power(results.signal)
+    results.noise_power = results.signal_power / (10 ** (config.OSNR_dB / 10))
+
+    # Compute noisy signal
+    results.noisy_signal = add_awgn(results.signal, results.signal_power, config)
+
+    # Compute PSDs
+    sampling_rate = config.baud_rate * config.N_samples_per_symbol
+    results.psd_original = compute_psd(results.signal, sampling_rate)
+    results.psd_noisy = compute_psd(results.noisy_signal, sampling_rate)
+
+    # Plot results
+    plot_psd_with_levels(
+        *results.psd_original,
+        results.signal_power,
+        results.noise_power,
+        title=f"PSD of Original Signal (N_ss={config.N_samples_per_symbol})",
+    )
+    plot_psd_with_levels(
+        *results.psd_noisy,
+        results.signal_power,
+        results.noise_power,
+        title=f"PSD of Noisy Signal (N_ss={config.N_samples_per_symbol})",
+    )
+
+    print(f"N_ss = {config.N_samples_per_symbol}")
+    print(f"Signal Power (dB): {10 * np.log10(results.signal_power):.2f}")
+    print(f"Noise Power (dB): {10 * np.log10(results.noise_power):.2f}")
+
+
+# Main function to execute the simulation
+def main():
+    config = SimulationConfig()
+    results = SimulationResults()
+
+    # Compute the OOK signal, noise and PSD and plot them
+    calculate_and_plot_PSD(config, results)
+
+    # Optional part
+    config.N_samples_per_symbol = 32
+    calculate_and_plot_PSD(config, results)
+
+
+if __name__ == "__main__":
+    main()

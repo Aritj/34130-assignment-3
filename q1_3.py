@@ -1,67 +1,149 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from q1_1 import Rb, Fs, symbols, ook_signal, noisy_signal
-from q1_2 import filtered_signal, plot_psd
+from q1_1 import (
+    seed,
+    SimulationConfig,
+    generate_OOK_signal,
+    calculate_signal_power,
+    add_awgn,
+)
+from q1_2 import create_gaussian_filter, apply_optical_filter
 
-# Step 1: Setup parameters for BER analysis
-OSNR_values_dB = np.arange(
-    16, 5, -1
-)  # OSNR values from 16 dB to 6 dB, decrement by 1 dB
-BER_results = []  # To store BER results
+np.random.seed(seed)  # Set seed for reproducability
+
+
+# Function to detect signal and make symbol decisions
+def detect_and_decide(signal, samples_per_symbol):
+    # Power detection (square law detection)
+    detected_signal = np.abs(signal) ** 2
+
+    # Downsample to symbol rate using mean of each symbol period
+    detected_reshape = detected_signal.reshape(-1, samples_per_symbol)
+    symbol_decisions = np.mean(detected_reshape, axis=1)
+
+    # Normalize to maximum value
+    symbol_decisions = symbol_decisions / np.max(symbol_decisions)
+
+    # Decision threshold at 0.5 for OOK
+    decisions = (symbol_decisions > 0.5).astype(int)
+    return decisions
 
 
 # Function to calculate BER
-def calculate_ber(original_symbols, detected_symbols):
-    errors = np.sum(original_symbols != detected_symbols)
-    return errors / len(original_symbols)
+def calculate_ber(decisions, original_bits):
+    errors = np.sum(decisions != original_bits)
+    # return max(errors / len(original_bits), 1e-7)  # Limit minimum BER for plotting with max() function
+    return errors / len(original_bits)
 
 
-# Step 2: Iterate through OSNR values
-for OSNR_dB in OSNR_values_dB:
-    OSNR_linear = 10 ** (OSNR_dB / 10)
+# Function to simulate system performance for given OSNR
+def simulate_performance(
+    base_config: SimulationConfig, filter_bw_factor, use_filter=True
+):
+    # Generate original signal and bits
+    time, signal, original_bits = generate_OOK_signal(base_config)
 
-    # Recalculate noise power
-    P_signal = np.mean(ook_signal**2)  # Signal power
-    B_ref = 12.5e9  # Reference bandwidth
-    N_ASE = P_signal / (2 * B_ref * OSNR_linear)
-    P_noise = N_ASE * Fs
+    # Calculate signal power
+    signal_power = calculate_signal_power(signal)
 
-    # Generate new noise and add to signal
-    sigma = np.sqrt(P_noise / 2)
-    noise = sigma * (
-        np.random.randn(len(ook_signal)) + 1j * np.random.randn(len(ook_signal))
-    )
-    noisy_signal_iter = ook_signal + np.real(noise)
-
-    # Apply filtering
-    noisy_signal_fft = np.fft.fftshift(np.fft.fft(noisy_signal_iter))
-    filtered_signal_fft = noisy_signal_fft * np.sqrt(
-        np.exp(
-            -0.5 * ((np.fft.fftfreq(len(noisy_signal_iter), d=1 / Fs) / (4 * Rb)) ** 2)
+    # Create optical filter if needed
+    if use_filter:
+        sampling_rate = base_config.baud_rate * base_config.N_samples_per_symbol
+        freqs = np.fft.fftshift(np.fft.fftfreq(len(signal), 1 / sampling_rate))
+        filter_transfer = create_gaussian_filter(
+            freqs,
+            center_freq=0,
+            bw_3dB=filter_bw_factor * base_config.baud_rate,
+            rejection_ratio_dB=20,
         )
-    )
-    filtered_signal_iter = np.fft.ifft(np.fft.ifftshift(filtered_signal_fft))
 
-    # Step 3: Perform detection (downsampling and thresholding)
-    downsampled_signal = filtered_signal_iter[::64]  # Downsample by Nss
-    detected_symbols = (np.real(downsampled_signal) > 0.5).astype(
-        int
-    )  # Simple thresholding
+    ber_results = []
+    for osnr_db in np.arange(6, 17, 1):  # 6 to 16 dB
+        # Create a new config with current OSNR
+        current_config = SimulationConfig()
+        current_config.N_samples_per_symbol = base_config.N_samples_per_symbol
+        current_config.baud_rate = base_config.baud_rate
+        current_config.N_symbols = base_config.N_symbols
+        current_config.OSNR_dB = osnr_db
 
-    # Calculate BER
-    BER = calculate_ber(symbols[: len(detected_symbols)], detected_symbols)
-    BER_results.append(BER)
+        # Add noise
+        noisy_signal = add_awgn(signal, signal_power, current_config)
 
-# Step 4: Plot OSNR-BER curve
-plt.figure()
-plt.plot(OSNR_values_dB, -np.log10(BER_results), "-*")
-plt.title("OSNR vs -log10(BER)")
-plt.xlabel("OSNR (dB)")
-plt.ylabel("-log10(BER)")
-plt.grid()
-plt.show()
+        # Apply optical filtering if requested
+        if use_filter:
+            processed_signal = apply_optical_filter(noisy_signal, filter_transfer)
+        else:
+            processed_signal = noisy_signal
 
-# Observations and comparisons
-print("BER results:")
-for osnr, ber in zip(OSNR_values_dB, BER_results):
-    print(f"OSNR: {osnr} dB, BER: {ber:.2e}")
+        # Detect and make decisions
+        decisions = detect_and_decide(
+            processed_signal, current_config.N_samples_per_symbol
+        )
+
+        # Calculate BER
+        ber = calculate_ber(decisions, original_bits)
+        ber_results.append((osnr_db, ber))
+
+        print(f"OSNR: {osnr_db} dB, BER: {ber:.2e}")
+
+    return np.array(ber_results)
+
+
+def plot_ber_curves(osnr_results, labels):
+    plt.figure(figsize=(10, 6))
+    h = plt.gca()
+
+    for result, label in zip(osnr_results, labels):
+        osnr_db, ber = result.T
+        plt.semilogy(osnr_db, ber, "-*", label=label)
+
+    # Configure plot style
+    h.grid(True, which="both")  # Add both major and minor gridlines
+    h.grid(True, which="minor", alpha=0.2)  # Make minor gridlines lighter
+
+    # Set font properties
+    h.set_xlabel("OSNR (dB)", fontsize=14)
+    h.set_ylabel("BER", fontsize=14)
+
+    plt.legend()
+    plt.show()
+
+
+def main():
+    # Set up configuration
+    config = SimulationConfig()
+    config.N_samples_per_symbol = 16
+    config.N_symbols = int(1e5)  # Large number of symbols for accurate BER
+
+    results = []
+    print("Simulating without filtering...")
+    results.append(simulate_performance(config, 2, use_filter=False))
+
+    print("Simulating with 2*Rs filter bandwidth...")
+    results.append(simulate_performance(config, 2, use_filter=True))
+
+    print("Simulating with Rs filter bandwidth...")
+    results.append(simulate_performance(config, 1, use_filter=True))
+
+    print("Simulating with 0.75*Rs filter bandwidth...")
+    results.append(simulate_performance(config, 0.75, use_filter=True))
+
+    print("Simulating with 0.5*Rs filter bandwidth...")
+    results.append(simulate_performance(config, 0.5, use_filter=True))
+
+    print("Simulating with 0.25*Rs filter bandwidth...")
+    results.append(simulate_performance(config, 0.25, use_filter=True))
+
+    labels = [
+        "No filtering",
+        "Filter BW = 2Rs",
+        "Filter BW = Rs",
+        "Filter BW = 0.75Rs",
+        "Filter BW = 0.5Rs",
+        "Filter BW = 0.25Rs",
+    ]
+    plot_ber_curves(results, labels)
+
+
+if __name__ == "__main__":
+    main()

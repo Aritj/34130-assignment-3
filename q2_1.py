@@ -1,75 +1,140 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from q1_1 import Rb, plot_psd
+from q1_1 import seed
 
-# Step 1: Set up parameters for WDM signal generation
-Nss = 64  # Number of samples per symbol
-Nsym = 100000  # Number of symbols per channel
-F_spacing = 50e9  # Channel spacing in Hz
-N_channels = 5  # Number of WDM channels
-Fs_wdm = Nss * Rb  # Sampling frequency
-
-# Time grid
-T_total = Nsym / Rb  # Total simulation time
-N_total = int(Fs_wdm * T_total)  # Total number of samples
-t = np.linspace(0, T_total, N_total, endpoint=False)
-
-# Step 2: Generate OOK signal for the base channel
-np.random.seed(34310)  # Seed for reproducibility
-symbols = np.random.choice([0, 1], Nsym)  # Generate random binary symbols
-ook_signal = np.repeat(symbols, Nss)  # NRZ pulse shaping (repeat each symbol Nss times)
-
-# Frequency grid
-F = np.fft.fftfreq(N_total, d=1 / Fs_wdm)
-
-# Step 3: Generate WDM signal by frequency-shifting the base channel
-wdm_signal = np.zeros(N_total, dtype=complex)
-for i in range(N_channels):
-    f_shift = (i - (N_channels - 1) / 2) * F_spacing  # Frequency shift for each channel
-    carrier = np.exp(
-        1j * 2 * np.pi * f_shift * t
-    )  # Complex exponential for frequency shifting
-    wdm_signal += (
-        ook_signal * carrier
-    )  # Add the frequency-shifted channel to WDM signal
+np.random.seed(seed)  # Set seed for reproducability
 
 
-# Step 4: Add AWGN to the WDM signal
-OSNR_per_channel_dB = 20  # OSNR per channel in dB
-OSNR_total_dB = OSNR_per_channel_dB + 10 * np.log10(N_channels)  # Total OSNR in dB
-OSNR_linear = 10 ** (OSNR_total_dB / 10)  # Convert total OSNR to linear scale
-P_signal = np.mean(np.abs(wdm_signal) ** 2)  # Signal power
-B_ref = 12.5e9  # Reference bandwidth (~12.5 GHz)
-N_ASE = P_signal / (2 * B_ref * OSNR_linear)  # Noise power spectral density
-P_noise = N_ASE * Fs_wdm  # Total noise power
-
-# Generate AWGN noise
-sigma = np.sqrt(P_noise / 2)
-noise = sigma * (
-    np.random.randn(len(wdm_signal)) + 1j * np.random.randn(len(wdm_signal))
-)
-noisy_wdm_signal = wdm_signal + noise
+class WDMConfig:
+    def __init__(self):
+        self.N_samples_per_symbol = 64
+        self.baud_rate = 10e9  # 10 Gbaud
+        self.N_symbols = int(1e5)  # Number of symbols
+        self.channel_spacing = 50e9  # 50 GHz
+        self.N_channels = 5
+        self.OSNR_dB = 20  # OSNR per channel in dB
 
 
-# Step 5: Mark signal and noise levels
-signal_level = 10 * np.log10(P_signal)
-noise_level = 10 * np.log10(P_noise)
+def generate_wdm_channel(config: WDMConfig, channel_index: int):
+    """Generate a single WDM channel with frequency shift. Returns signal and bits."""
+    # Generate random bits for this channel
+    bits = np.random.randint(0, 2, config.N_symbols)
+
+    # Generate NRZ signal
+    N_samples = config.N_samples_per_symbol * config.N_symbols
+    signal = np.repeat(bits, config.N_samples_per_symbol)
+
+    # Calculate time grid
+    time = np.linspace(
+        0, config.N_symbols / config.baud_rate, N_samples, endpoint=False
+    )
+
+    # Calculate frequency offset for this channel
+    channel_offset = (
+        channel_index - (config.N_channels - 1) / 2
+    ) * config.channel_spacing
+
+    # Apply frequency shift
+    shifted_signal = signal * np.exp(1j * 2 * np.pi * channel_offset * time)
+
+    return shifted_signal, bits
+
+
+def generate_wdm_signal(config: WDMConfig):
+    """Generate complete WDM signal by combining all channels. Returns signal and all bits."""
+    N_samples = config.N_samples_per_symbol * config.N_symbols
+    wdm_signal = np.zeros(N_samples, dtype=np.complex128)
+    channel_bits = []
+
+    # Generate and combine all channels
+    for i in range(config.N_channels):
+        channel_signal, bits = generate_wdm_channel(config, i)
+        wdm_signal += channel_signal
+        channel_bits.append(bits)
+
+    return wdm_signal, channel_bits
+
+
+def plot_wdm_spectrum(signal, config: WDMConfig):
+    """Plot the power spectral density of the WDM signal."""
+    # Calculate sampling rate and frequency grid
+    sampling_rate = config.baud_rate * config.N_samples_per_symbol
+    freqs = np.fft.fftshift(np.fft.fftfreq(len(signal), 1 / sampling_rate))
+
+    # Calculate PSD with proper normalization
+    signal_fft = np.fft.fftshift(np.fft.fft(signal)) / len(signal)
+    psd = 10 * np.log10(np.abs(signal_fft) ** 2) - 30  # Convert to dBm/Hz
+
+    # Create plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(freqs / 1e9, psd, linewidth=1, color=[0, 0, 1, 0.2])
+
+    # Set axis limits
+    max_psd = np.max(psd)
+    plt.axis(
+        [
+            -sampling_rate / 2e9,
+            sampling_rate / 2e9,
+            max_psd - 70,  # Show 70 dB range
+            max_psd + 10,
+        ]
+    )
+
+    # Add channel markers
+    plt.text(0, max_psd + 7, "WDM channel", horizontalalignment="center")
+    for i in range(config.N_channels):
+        channel_freq = (i - (config.N_channels - 1) / 2) * config.channel_spacing
+        plt.text(
+            channel_freq / 1e9,
+            max_psd + 2,
+            f"{i+1}\n↓",
+            horizontalalignment="center",
+            verticalalignment="baseline",
+        )
+
+    plt.xlabel("Frequency (GHz)")
+    plt.ylabel("Power spectral density (dBm/Hz)")
+    plt.grid(True)
+    plt.show()
+
+
+def main():
+    # Answer Question 1
+    print("\nQuestion 1 Analysis:")
+    print("a) Why is Nss increased to 64?")
+    print(
+        "   - For WDM signals, we need higher sampling rate to accommodate multiple channels"
+    )
+    print(
+        "   - Total bandwidth = Channel spacing * (N_channels - 1) = 50 GHz * 4 = 200 GHz"
+    )
+    print("   - Minimum sampling rate = 2 * Total bandwidth = 400 GHz")
+    print(
+        "   - With Rs = 10 GHz, Nss = 64 gives sampling rate of 640 GHz, which is sufficient"
+    )
+
+    print("\nb) Calculate overall bandwidth and sampling frequency:")
+    config = WDMConfig()
+    fs = config.baud_rate * config.N_samples_per_symbol
+    total_bw = config.channel_spacing * (config.N_channels - 1)
+    print(f"   - Total bandwidth = {total_bw/1e9:.1f} GHz")
+    print(f"   - Sampling frequency = {fs/1e9:.1f} GHz")
+
+    print("\nc) Why Nss = 64 instead of 16:")
+    print("   - Nyquist sampling theorem requires fs > 2 * signal_bandwidth")
+    print("   - With 16 samples/symbol: fs = 16 * 10 GHz = 160 GHz")
+    print("   - This is less than required 2 * 200 GHz = 400 GHz")
+    print("   - With 64 samples/symbol: fs = 640 GHz, which satisfies Nyquist")
+
+    print("\nd) Minimum Nss required:")
+    min_nss = np.ceil(2 * total_bw / config.baud_rate)
+    print(f"   - Minimum Nss = ceil(2 * total_bw / Rs) = {min_nss}")
+
+    # Generate and plot WDM signal
+    print("\nGenerating WDM signal...")
+    wdm_signal, bits = generate_wdm_signal(config)
+    plot_wdm_spectrum(wdm_signal, config)
+
 
 if __name__ == "__main__":
-    # Plot PSD of the WDM signal
-    plot_psd(np.real(wdm_signal), Fs_wdm, "PSD of WDM Signal")
-
-    # Plot PSD of the noisy WDM signal
-    plot_psd(np.real(noisy_wdm_signal), Fs_wdm, "PSD of Noisy WDM Signal")
-
-    print(f"Signal Level: {signal_level:.2f} dB")
-    print(f"Noise Level: {noise_level:.2f} dB")
-
-    # Questions:
-    # Why the samples per symbol, Nss, is increased compared to single-channel simulation?
-    # Answer: Increasing Nss ensures better resolution in the frequency domain, allowing accurate representation of closely spaced WDM channels.
-
-    # Calculate the overall bandwidth of the WDM signal and the sampling frequency
-    bandwidth_wdm = N_channels * F_spacing  # Total bandwidth of WDM signal
-    print(f"Total Bandwidth of WDM Signal: {bandwidth_wdm / 1e9:.2f} GHz")
-    print(f"Sampling Frequency: {Fs_wdm / 1e9:.2f} GHz")
+    main()
