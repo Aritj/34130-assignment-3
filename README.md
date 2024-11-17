@@ -76,25 +76,3 @@ python q2_1.py
 python q2_2.py
 python q2_3.py
 ```
-
-## Key Findings
-1. **Filter Bandwidth Effects**:
-   - 2Rs bandwidth provides optimal performance
-   - Narrower filters cause signal distortion
-   - Wider filters allow more noise
-
-2. **WDM Performance**:
-   - Channel spacing adequately prevents interference
-   - Center and edge channels show different performance
-   - OSNR requirements vary by channel position
-
-3. **System Optimization**:
-   - Filter bandwidth critically affects performance
-   - Trade-off between noise reduction and signal distortion
-   - Channel spacing impacts inter-channel interference
-
-## Future Improvements
-- Implementation of advanced modulation formats
-- Addition of fiber propagation effects
-- Enhanced filtering techniques
-- Chromatic dispersion compensation
