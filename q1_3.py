@@ -11,6 +11,9 @@ from q1_2 import create_gaussian_filter, apply_optical_filter
 
 np.random.seed(seed)  # Set seed for reproducability
 
+# Set figure DPI to 300 (increasing plot resolution)
+plt.rcParams["savefig.dpi"] = 300
+
 
 # Function to detect signal and make symbol decisions
 def detect_and_decide(signal, samples_per_symbol):

@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 seed = 34310
 np.random.seed(seed)  # Set seed for reproducability
 
+# Set figure DPI to 300 (increasing plot resolution)
+plt.rcParams["savefig.dpi"] = 300
+
 
 # Module for configuration and results storage
 class SimulationConfig:
@@ -18,11 +21,14 @@ class SimulationResults:
     def __init__(self):
         self.time = None
         self.signal = None
+        self.noisy_signal = None
+        self.filtered_signal = None
         self.signal_power = None
         self.noise_power = None
-        self.noisy_signal = None
         self.psd_original = None
         self.psd_noisy = None
+        self.psd_filtered = None
+        self.sampling_rate = None
 
 
 # Function to generate an OOK signal with NRZ pulse shaping
@@ -60,66 +66,121 @@ def compute_psd(signal, sampling_rate):
     return freqs, 10 * np.log10(psd)
 
 
-def plot_signal(results: SimulationResults, config: SimulationConfig):
+def plot_signals(results: SimulationResults, config: SimulationConfig):
     plt.figure()
-    plt.plot(results.time * 1e9, results.signal, label="NRZ OOK signal")
+    plt.plot(
+        results.time * 1e9,
+        results.noisy_signal,
+        label="Noisy OOK signal",
+        color="blue",
+    )
+    plt.plot(
+        results.time * 1e9,
+        results.signal,
+        linestyle="--",
+        label="OOK signal",
+        color="darkorange",
+    )
     plt.xlabel("Time (ns)")
     plt.ylabel("Amplitude")
-    plt.title("Pulse-shaped OOK Signal")
-    plt.legend()
+    plt.title(f"OOK and noisy OOK signals (N_ss={config.N_samples_per_symbol})")
     plt.grid()
+    plt.legend()
+    plt.ylim(-0.2, 1.4)
     plt.xlim(0, 1e9 * 10 / (config.baud_rate))
     plt.show()
 
 
 # Function to plot results
-def plot_psd_with_levels(freqs, psd, signal_power, noise_power, title):
-    plt.figure()
-    plt.plot(freqs, psd, label="PSD")
-    plt.axhline(
-        10 * np.log10(signal_power), color="g", linestyle="--", label="Signal Level"
+def plot_psd_with_levels(results: SimulationResults, config: SimulationConfig):
+    freqs_original, psd_original = results.psd_original
+    freqs_noisy, psd_noisy = results.psd_noisy
+
+    plt.figure(figsize=(12, 6))
+
+    # Subplot for OOK PSD
+    plt.subplot(1, 2, 1)
+    plt.plot(
+        freqs_original / 1e9,
+        psd_original,
+        label="OOK PSD",
+        color="darkorange",
     )
     plt.axhline(
-        10 * np.log10(noise_power), color="r", linestyle="--", label="Noise Level"
+        10 * np.log10(results.signal_power),
+        color="g",
+        linestyle="--",
+        label="Signal Level",
     )
-    plt.title(title)
-    plt.xlabel("Frequency (Hz)")
+    plt.axhline(
+        10 * np.log10(results.noise_power),
+        color="r",
+        linestyle="--",
+        label="Noise Level",
+    )
+    plt.ylim(-60, 50)
+    plt.xlim(freqs_original.min() / 1e9, freqs_original.max() / 1e9)
+    plt.title(f"PSD of OOK Signal (N_ss={config.N_samples_per_symbol})")
+    plt.xlabel("Frequency (GHz)")
     plt.ylabel("PSD (dB/Hz)")
     plt.legend()
     plt.grid()
+
+    # Subplot for noisy OOK PSD
+    plt.subplot(1, 2, 2)
+    plt.plot(freqs_noisy * 1e-9, psd_noisy, label="Noisy OOK PSD", color="blue")
+    plt.axhline(
+        10 * np.log10(results.signal_power),
+        color="g",
+        linestyle="--",
+        label="Signal Level",
+    )
+    plt.axhline(
+        10 * np.log10(results.noise_power),
+        color="r",
+        linestyle="--",
+        label="Noise Level",
+    )
+    plt.ylim(-60, 50)
+    plt.xlim(freqs_noisy.min() * 1e-9, freqs_noisy.max() * 1e-9)
+    plt.title(f"PSD of Noisy OOK Signal (N_ss={config.N_samples_per_symbol})")
+    plt.xlabel("Frequency (GHz)")
+    plt.ylabel("PSD (dB/Hz)")
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
     plt.show()
 
 
-def calculate_and_plot_PSD(config: SimulationConfig, results: SimulationResults):
-    # Generate and plot OOK signal
+def calculate_results(config: SimulationConfig, results: SimulationResults):
+    # Compute OOK signal
     results.time, results.signal, bits = generate_OOK_signal(config)
-    plot_signal(results, config)
 
-    # Computer signal and noise power
+    # Compute signal and noise power
     results.signal_power = calculate_signal_power(results.signal)
     results.noise_power = results.signal_power / (10 ** (config.OSNR_dB / 10))
 
-    # Compute noisy signal
+    # Compute noisy OOK signal
     results.noisy_signal = add_awgn(results.signal, results.signal_power, config)
 
     # Compute PSDs
-    sampling_rate = config.baud_rate * config.N_samples_per_symbol
-    results.psd_original = compute_psd(results.signal, sampling_rate)
-    results.psd_noisy = compute_psd(results.noisy_signal, sampling_rate)
+    results.sampling_rate = config.baud_rate * config.N_samples_per_symbol
+    results.psd_original = compute_psd(results.signal, results.sampling_rate)
+    results.psd_noisy = compute_psd(results.noisy_signal, results.sampling_rate)
 
-    # Plot results
-    plot_psd_with_levels(
-        *results.psd_original,
-        results.signal_power,
-        results.noise_power,
-        title=f"PSD of Original Signal (N_ss={config.N_samples_per_symbol})",
-    )
-    plot_psd_with_levels(
-        *results.psd_noisy,
-        results.signal_power,
-        results.noise_power,
-        title=f"PSD of Noisy Signal (N_ss={config.N_samples_per_symbol})",
-    )
+    return results
+
+
+def calculate_and_plot_PSD(config: SimulationConfig, results: SimulationResults):
+    # Calculate results
+    results = calculate_results(config, results)
+
+    # Plot OOK and noisy OOK signals
+    plot_signals(results, config)
+
+    # Plot PSD
+    plot_psd_with_levels(results, config)
 
     print(f"N_ss = {config.N_samples_per_symbol}")
     print(f"Signal Power (dB): {10 * np.log10(results.signal_power):.2f}")

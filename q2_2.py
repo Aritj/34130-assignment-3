@@ -1,10 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from q1_1 import (
-    seed,
-    calculate_signal_power,
-    add_awgn,
-)
+from q1_1 import seed, calculate_signal_power, add_awgn
 from q1_2 import (
     create_gaussian_filter,
     apply_optical_filter,
@@ -15,6 +11,9 @@ from q1_3 import calculate_ber
 from q2_1 import WDMConfig, generate_wdm_signal
 
 np.random.seed(seed)
+
+# Set figure DPI to 300 (increasing plot resolution)
+plt.rcParams["savefig.dpi"] = 300
 
 
 def make_decisions(detected_signal, config: WDMConfig):

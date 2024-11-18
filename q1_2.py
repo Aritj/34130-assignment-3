@@ -4,14 +4,14 @@ from q1_1 import (
     seed,
     SimulationConfig,
     SimulationResults,
-    generate_OOK_signal,
-    calculate_signal_power,
-    add_awgn,
     compute_psd,
-    plot_psd_with_levels,
+    calculate_results,
 )
 
 np.random.seed(seed)  # Set seed for reproducability
+
+# Set figure DPI to 300 (increasing plot resolution)
+plt.rcParams["savefig.dpi"] = 300
 
 
 # Function to create a Gaussian optical filter
@@ -46,12 +46,45 @@ def plot_filter_transfer_function(freqs, filter_transfer):
         freqs / 1e9,
         10 * np.log10(np.abs(filter_transfer) ** 2),
         label="Filter Transfer Function (Power)",
+        color="blue",
     )
     plt.title("Gaussian Filter Transfer Function")
     plt.xlabel("Frequency (GHz)")
     plt.ylabel("Rejection (dB)")
+    plt.xlim(freqs.min() / 1e9, freqs.max() / 1e9)
+    plt.grid()
+    plt.show()
+
+
+def plot_signals(results: SimulationResults, config: SimulationConfig):
+    plt.figure()
+    plt.plot(
+        results.time * 1e9,
+        results.noisy_signal,
+        label="Noisy OOK signal",
+        color="blue",
+    )
+    plt.plot(
+        results.time * 1e9,
+        results.filtered_signal,
+        label="Filtered OOK signal",
+        linestyle="-.",
+        color="magenta",
+    )
+    plt.plot(
+        results.time * 1e9,
+        results.signal,
+        linestyle="--",
+        label="OOK signal",
+        color="darkorange",
+    )
+    plt.xlabel("Time (ns)")
+    plt.ylabel("Amplitude")
+    plt.title(f"OOK and noisy OOK signals (N_ss={config.N_samples_per_symbol})")
     plt.grid()
     plt.legend()
+    plt.ylim(-0.2, 1.4)
+    plt.xlim(0, 1e9 * 10 / (config.baud_rate))
     plt.show()
 
 
@@ -77,6 +110,7 @@ def plot_eye_diagram(signal, samples_per_symbol, title):
     plt.show()
 
 
+"""
 # Function to plot waveform
 def plot_waveform(signal, time, title):
     plt.figure()
@@ -92,6 +126,94 @@ def plot_waveform(signal, time, title):
     plt.ylabel("Amplitude")
     plt.grid()
     plt.show()
+"""
+
+
+def plot_filtered_psd_with_levels(results: SimulationResults, config: SimulationConfig):
+    freqs_original, psd_original = results.psd_original
+    freqs_noisy, psd_noisy = results.psd_noisy
+    freqs_filtered, psd_filtered = results.psd_filtered
+
+    plt.figure(figsize=(18, 6))
+
+    # Subplot for OOK PSD
+    plt.subplot(1, 3, 1)
+    plt.plot(
+        freqs_original / 1e9,
+        psd_original,
+        label="OOK PSD",
+        color="darkorange",
+    )
+    plt.axhline(
+        10 * np.log10(results.signal_power),
+        color="g",
+        linestyle="--",
+        label="Signal Level",
+    )
+    plt.axhline(
+        10 * np.log10(results.noise_power),
+        color="r",
+        linestyle="--",
+        label="Noise Level",
+    )
+    plt.ylim(-60, 50)
+    plt.xlim(freqs_original.min() / 1e9, freqs_original.max() / 1e9)
+    plt.title(f"PSD of OOK Signal (N_ss={config.N_samples_per_symbol})")
+    plt.xlabel("Frequency (GHz)")
+    plt.ylabel("PSD (dB/Hz)")
+    plt.legend()
+    plt.grid()
+
+    # Subplot for noisy OOK PSD
+    plt.subplot(1, 3, 2)
+    plt.plot(freqs_noisy * 1e-9, psd_noisy, label="Noisy OOK PSD", color="blue")
+    plt.axhline(
+        10 * np.log10(results.signal_power),
+        color="g",
+        linestyle="--",
+        label="Signal Level",
+    )
+    plt.axhline(
+        10 * np.log10(results.noise_power),
+        color="r",
+        linestyle="--",
+        label="Noise Level",
+    )
+    plt.ylim(-60, 50)
+    plt.xlim(freqs_noisy.min() * 1e-9, freqs_noisy.max() * 1e-9)
+    plt.title(f"PSD of Noisy OOK Signal (N_ss={config.N_samples_per_symbol})")
+    plt.xlabel("Frequency (GHz)")
+    plt.ylabel("PSD (dB/Hz)")
+    plt.legend()
+    plt.grid()
+
+    # Subplot for filtered OOK PSD
+    plt.subplot(1, 3, 3)
+    plt.plot(
+        freqs_filtered * 1e-9, psd_filtered, label="Filtered OOK PSD", color="magenta"
+    )
+    plt.axhline(
+        10 * np.log10(results.signal_power),
+        color="g",
+        linestyle="--",
+        label="Signal Level",
+    )
+    plt.axhline(
+        10 * np.log10(results.noise_power),
+        color="r",
+        linestyle="--",
+        label="Noise Level",
+    )
+    plt.ylim(-60, 50)
+    plt.xlim(freqs_filtered.min() * 1e-9, freqs_filtered.max() * 1e-9)
+    plt.title(f"PSD of Filtered OOK Signal (N_ss={config.N_samples_per_symbol})")
+    plt.xlabel("Frequency (GHz)")
+    plt.ylabel("PSD (dB/Hz)")
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
+    plt.show()
 
 
 # Main function
@@ -99,49 +221,38 @@ def main():
     config = SimulationConfig()
     results = SimulationResults()
 
-    # Generate OOK signal and add noise
-    results.time, results.signal, bits = generate_OOK_signal(config)
-    results.signal_power = calculate_signal_power(results.signal)
-    results.noisy_signal = add_awgn(results.signal, results.signal_power, config)
+    results = calculate_results(config, results)
 
     # Compute PSD of noisy signal
-    sampling_rate = config.baud_rate * config.N_samples_per_symbol
-    freqs, psd_noisy = compute_psd(results.noisy_signal, sampling_rate)
+    freqs, _ = results.psd_noisy
 
     # Create Gaussian filter
-    bw_3dB = 4 * config.baud_rate  # 3-dB bandwidth
-    rejection_ratio_dB = 20  # Rejection ratio in dB
     filter_transfer = create_gaussian_filter(
-        freqs, center_freq=0, bw_3dB=bw_3dB, rejection_ratio_dB=rejection_ratio_dB
+        freqs, center_freq=0, bw_3dB=4 * config.baud_rate, rejection_ratio_dB=20
     )
 
     # Apply the filter to the noisy signal
-    filtered_signal = apply_optical_filter(results.noisy_signal, filter_transfer)
+    results.filtered_signal = apply_optical_filter(
+        results.noisy_signal, filter_transfer
+    )
 
     # Compute PSD of filtered signal
-    freqs, psd_filtered = compute_psd(filtered_signal, sampling_rate)
+    results.psd_filtered = compute_psd(results.filtered_signal, results.sampling_rate)
 
+    # Plot signals
+    plot_signals(results, config)
+
+    # Plot transfer function
     plot_filter_transfer_function(freqs, filter_transfer)
 
-    # Plot results
-    plot_psd_with_levels(
-        freqs,
-        psd_noisy,
-        results.signal_power,
-        results.signal_power / (10 ** (config.OSNR_dB / 10)),
-        title="PSD of Noisy Signal",
-    )
-    plot_psd_with_levels(
-        freqs,
-        psd_filtered,
-        results.signal_power,
-        results.signal_power / (10 ** (config.OSNR_dB / 10)),
-        title="PSD of Filtered Signal",
-    )
+    # Plot PSD results
+    plot_filtered_psd_with_levels(results, config)
 
     # Plot waveforms
-    plot_waveform(results.noisy_signal, results.time, title="Waveform of Noisy Signal")
-    plot_waveform(filtered_signal, results.time, title="Waveform of Filtered Signal")
+    # plot_waveform(results.noisy_signal, results.time, title="Waveform of Noisy Signal")
+    # plot_waveform(
+    #    results.filtered_signal, results.time, title="Waveform of Filtered Signal"
+    # )
 
     # Plot eye diagrams
     plot_eye_diagram(
@@ -150,7 +261,7 @@ def main():
         title="Eye Diagram of Noisy Signal",
     )
     plot_eye_diagram(
-        filtered_signal,
+        results.filtered_signal,
         config.N_samples_per_symbol,
         title="Eye Diagram of Filtered Signal",
     )

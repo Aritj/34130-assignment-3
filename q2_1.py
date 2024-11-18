@@ -4,6 +4,9 @@ from q1_1 import seed
 
 np.random.seed(seed)  # Set seed for reproducability
 
+# Set figure DPI to 300 (increasing plot resolution)
+plt.rcParams["savefig.dpi"] = 300
+
 
 class WDMConfig:
     def __init__(self):
