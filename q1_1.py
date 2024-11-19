@@ -159,7 +159,8 @@ def calculate_results(config: SimulationConfig, results: SimulationResults):
 
     # Compute signal and noise power
     results.signal_power = calculate_signal_power(results.signal)
-    results.noise_power = results.signal_power / (10 ** (config.OSNR_dB / 10))
+    OSNR_linear = 10 ** (config.OSNR_dB / 10)
+    results.noise_power = results.signal_power / OSNR_linear
 
     # Compute noisy OOK signal
     results.noisy_signal = add_awgn(results.signal, results.signal_power, config)
