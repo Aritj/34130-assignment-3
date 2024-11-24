@@ -1,171 +1,153 @@
+from q2_1 import WDMConfig, generate_wdm_signal
+from q1_1 import add_noise
+from q1_2 import plot_filter_response, create_gaussian_filter, filter_signal
 import numpy as np
 import matplotlib.pyplot as plt
-from q1_1 import seed, calculate_signal_power, add_awgn
-from q1_2 import (
-    create_gaussian_filter,
-    apply_optical_filter,
-    plot_eye_diagram,
-    plot_filter_transfer_function,
-)
-from q1_3 import calculate_ber
-from q2_1 import WDMConfig, generate_wdm_signal
-
-np.random.seed(seed)
-
-# Set figure DPI to 300 (increasing plot resolution)
-plt.rcParams["savefig.dpi"] = 300
 
 
-def make_decisions(detected_signal, config: WDMConfig):
-    """Make bit decisions from detected signal."""
-    # Reshape signal into symbol periods
-    signal_reshape = detected_signal.reshape(-1, config.N_samples_per_symbol)
-
-    # Take mean of each symbol period
-    symbol_values = np.mean(signal_reshape, axis=1)
-
-    # Normalize
-    symbol_values = symbol_values / np.max(symbol_values)
-
-    # Decision threshold at 0.5
-    decisions = (symbol_values > 0.5).astype(int)
-
-    return decisions
+def apply_optical_filter(signal, Hf_field):
+    """Apply optical filter to signal."""
+    nfft = len(signal)
+    signal_fft = np.fft.fftshift(np.fft.fft(signal))
+    filtered_fft = signal_fft * Hf_field
+    return np.fft.ifft(np.fft.ifftshift(filtered_fft))
 
 
-def detect_wdm_channel(wdm_signal: np.ndarray, config: WDMConfig, target_channel: int):
-    """Extract and detect a single channel from WDM signal."""
-    # Calculate frequency grid
-    sampling_rate = config.baud_rate * config.N_samples_per_symbol
-    freqs = np.fft.fftshift(np.fft.fftfreq(len(wdm_signal), 1 / sampling_rate))
-
-    # Calculate center frequency for target channel
-    channel_offset = (
-        target_channel - (config.N_channels - 1) / 2
-    ) * config.channel_spacing
-
-    # Create optical filter centered on target channel
-    filter_transfer = create_gaussian_filter(
-        freqs,
-        center_freq=channel_offset,
-        bw_3dB=2 * config.baud_rate,  # 2*Rs bandwidth
-        rejection_ratio_dB=20,
-    )
-
-    # Plot filter transfer function
-    plot_filter_transfer_function(freqs, filter_transfer)
-
-    # Apply optical filter to extract channel
-    filtered_signal = apply_optical_filter(wdm_signal, filter_transfer)
-
-    return filtered_signal
+def calculate_psd(signal, Fs):
+    """Calculate power spectral density."""
+    nfft = len(signal)
+    f = np.fft.fftshift(np.fft.fftfreq(nfft, 1 / Fs))
+    signal_fft = np.fft.fftshift(np.fft.fft(signal)) / nfft
+    psd = (
+        10 * np.log10(np.abs(signal_fft) ** 2 + np.finfo(float).eps) - 30
+    )  # Convert to dBm/Hz
+    return f, psd
 
 
-def plot_signal_spectrum(signal, config: WDMConfig, title: str):
-    """Plot power spectral density of a signal."""
-    # Calculate frequency grid
-    sampling_rate = config.baud_rate * config.N_samples_per_symbol
-    freqs = np.fft.fftshift(np.fft.fftfreq(len(signal), 1 / sampling_rate))
+def plot_detected_signal(signal, config: WDMConfig):
+    """Plot detected signal waveform for first 10 symbols."""
+    plt.figure(figsize=(12, 4))
 
-    # Calculate PSD
-    signal_fft = np.fft.fftshift(np.fft.fft(signal)) / len(signal)
-    psd = 10 * np.log10(np.abs(signal_fft) ** 2) - 30  # Convert to dBm/Hz
+    # Calculate time vector in picoseconds
+    plot_symbols = 10
+    samples_to_plot = plot_symbols * config.N_samples_per_symbol
+    t = np.arange(samples_to_plot) / (config.baud_rate * config.N_samples_per_symbol)
+    t_ps = t * 1e12  # Convert to picoseconds
+
+    # Plot only first 10 symbols without normalization
+    plt.plot(t_ps, signal[:samples_to_plot])
+    plt.xlabel("Time (ps)")
+    plt.ylabel("Electrical Signal Power")
+    plt.title("Directly Detected WDM Signal")
+    plt.xlim(0, 1000)
+    plt.grid()
+    plt.show()
+
+
+def plot_psd(signal, Fs, title, max_freq=None):
+    """Plot power spectral density."""
+    f, psd = calculate_psd(signal, Fs)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(freqs / 1e9, psd, linewidth=1)
-
-    # Set axis limits
-    """
-    max_psd = np.max(psd)
-    plt.axis(
-        [
-            -sampling_rate / 4e9,  # Show smaller frequency range for better detail
-            sampling_rate / 4e9,
-            max_psd - 70,
-            max_psd + 10,
-        ]
-    )
-    """
-
+    plt.plot(f / 1e9, psd, linewidth=1)
+    if max_freq:
+        plt.xlim(-max_freq / 1e9, max_freq / 1e9)
     plt.xlabel("Frequency (GHz)")
-    plt.ylabel("Power spectral density (dBm/Hz)")
+    plt.ylabel("Power Spectral Density (dBm/Hz)")
     plt.title(title)
     plt.grid(True)
     plt.show()
 
 
-def detect_signal(signal, config: WDMConfig):
-    """Perform direct detection on the optical signal."""
-    # Square law detection
-    detected_signal = np.abs(signal) ** 2
+def plot_eye_diagram(signal, samples_per_symbol, title, num_symbols=200):
+    """Plot eye diagram using optical power."""
+    plt.figure(figsize=(8, 6))
+    signal_section = signal[: samples_per_symbol * num_symbols]
+    signal_power = np.abs(signal_section) ** 2
 
-    # Apply baseband filter to limit electrical bandwidth
-    sampling_rate = config.baud_rate * config.N_samples_per_symbol
-    freqs = np.fft.fftshift(np.fft.fftfreq(len(signal), 1 / sampling_rate))
+    for i in range(num_symbols):
+        t = np.arange(0, samples_per_symbol) / samples_per_symbol
+        plt.plot(t, signal_power[i * samples_per_symbol : (i + 1) * samples_per_symbol])
 
-    # Create and apply electrical filter
-    bb_filter = create_gaussian_filter(
-        freqs, center_freq=0, bw_3dB=2 * config.baud_rate, rejection_ratio_dB=20
-    )
-
-    # Apply filter in frequency domain
-    signal_fft = np.fft.fftshift(np.fft.fft(detected_signal))
-    filtered_fft = signal_fft * bb_filter
-    filtered_signal = np.real(np.fft.ifft(np.fft.ifftshift(filtered_fft)))
-
-    return filtered_signal
+    plt.xlabel("Symbol Time")
+    plt.ylabel("Optical Power")
+    plt.title(title)
+    plt.grid(True)
+    plt.xlim(0, t.max())
+    plt.show()
 
 
-def analyze_channel(
-    wdm_signal: np.ndarray, original_bits: list, config: WDMConfig, target_channel: int
-):
-    """Analyze a single WDM channel through filtering and detection."""
-    print(f"\nAnalyzing Channel {target_channel + 1}:")
-
-    # Extract channel using optical filter
-    filtered_signal = detect_wdm_channel(wdm_signal, config, target_channel)
-
-    # Plot optical spectrum before and after filtering
-    plot_signal_spectrum(wdm_signal, config, "WDM Signal Spectrum Before Filtering")
-    plot_signal_spectrum(
-        filtered_signal, config, f"Extracted Channel {target_channel+1} Spectrum"
-    )
-
-    # Detect the filtered signal
-    detected_signal = detect_signal(filtered_signal, config)
-
-    # Make decisions and calculate BER
-    decisions = make_decisions(detected_signal, config)
-    ber = calculate_ber(decisions, original_bits[target_channel])
-
-    return detected_signal, decisions, ber
+def calculate_signal_power(signal):
+    """Calculate average signal power."""
+    return np.mean(np.abs(signal) ** 2)
 
 
 def main():
-    # Setup configuration
+    # Initialize configuration
     config = WDMConfig()
 
-    # Generate WDM signal
-    print("Generating WDM signal...")
+    print("\nGenerating WDM signal...")
     wdm_signal, channel_bits = generate_wdm_signal(config)
 
-    # Add some noise
-    signal_power = calculate_signal_power(wdm_signal)
-    config.OSNR_dB = 20  # Set OSNR for demonstration
-    noisy_signal = add_awgn(wdm_signal, signal_power, config)
+    # Calculate sampling rate
+    Fs = config.baud_rate * config.N_samples_per_symbol
 
-    # Analyze first channel (as an example)
-    target_channel = 0  # First channel
-    detected_signal, decisions, ber = analyze_channel(
-        noisy_signal, channel_bits, config, target_channel
-    )
-    print(f"Channel {target_channel+1}: {ber}")
+    # Plot original WDM signal spectrum
+    print("\nPlotting original WDM spectrum...")
+    plot_psd(wdm_signal, Fs, "Original WDM Signal Spectrum", max_freq=200e9)
 
-    # Plot eye diagram
+    # Add noise to signal
+    noisy_signal = add_noise(wdm_signal, config.OSNR_dB)
+
+    # Plot noisy WDM spectrum
+    print("\nPlotting noisy WDM spectrum...")
+    plot_psd(noisy_signal, Fs, "Noisy WDM Signal Spectrum", max_freq=200e9)
+
+    # Plot results
+    print("\nPlotting detected signal...")
+    plot_detected_signal(np.abs(noisy_signal) ** 2, config)
+
+    # Calculate frequency grid
+    f = np.fft.fftshift(np.fft.fftfreq(len(wdm_signal), 1 / Fs))
+
+    # Create optical filter for first channel
+    b3db = 2 * config.baud_rate
+    channel_index = 0
+    channel_offset = (
+        channel_index - (config.N_channels - 1) / 2
+    ) * config.channel_spacing
+    filter_bandwidth = 2 * config.baud_rate
+
+    # Create and apply optical filter
+    print("\nApplying optical filter...")
+    Hf_field, Hf_power = create_gaussian_filter(f, channel_offset, filter_bandwidth)
+    filtered_signal = filter_signal(noisy_signal, Hf_field)
+
+    # Plot filter response
+    plot_filter_response(f, Hf_power, channel_offset, b3db)
+
+    # Plot filtered signal spectrum
+    print("\nPlotting filtered signal spectrum...")
+    plot_psd(filtered_signal, Fs, "Filtered Channel Spectrum", max_freq=200e9)
+
+    # Direct detection
+    detected_signal = np.abs(filtered_signal) ** 2
+
+    # Apply baseband electrical filter
+    bb_filter, bb_power = create_gaussian_filter(f, 0, b3db, order=2)
+    electrical_signal = np.real(filter_signal(detected_signal, bb_filter))
+
+    # Plot eye diagrams
+    print("\nPlotting eye diagrams...")
     plot_eye_diagram(
-        detected_signal[:20000],
+        filtered_signal,
         config.N_samples_per_symbol,
-        f"Eye Diagram - Channel {target_channel+1}",
+        "Eye Diagram Before Electrical Filtering",
+    )
+    plot_eye_diagram(
+        electrical_signal,
+        config.N_samples_per_symbol,
+        "Eye Diagram After Electrical Filtering",
     )
 
 

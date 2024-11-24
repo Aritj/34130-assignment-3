@@ -101,42 +101,67 @@ def plot_wdm_spectrum(signal, config: WDMConfig):
     plt.show()
 
 
-def main():
-    # Answer Question 1
-    print("\nQuestion 1 Analysis:")
-    print("a) Why is Nss increased to 64?")
-    print(
-        "   - For WDM signals, we need higher sampling rate to accommodate multiple channels"
-    )
-    print(
-        "   - Total bandwidth = Channel spacing * (N_channels - 1) = 50 GHz * 4 = 200 GHz"
-    )
-    print("   - Minimum sampling rate = 2 * Total bandwidth = 400 GHz")
-    print(
-        "   - With Rs = 10 GHz, Nss = 64 gives sampling rate of 640 GHz, which is sufficient"
-    )
+def plot_detected_signal(signal, config: WDMConfig):
+    """Plot detected signal waveform for first 10 symbols."""
+    plt.figure(figsize=(12, 4))
 
-    print("\nb) Calculate overall bandwidth and sampling frequency:")
+    # Calculate time vector in picoseconds
+    plot_symbols = 10
+    samples_to_plot = plot_symbols * config.N_samples_per_symbol
+    t = np.arange(samples_to_plot) / (config.baud_rate * config.N_samples_per_symbol)
+    t_ps = t * 1e12  # Convert to picoseconds
+
+    # Plot only first 10 symbols without normalization
+    plt.plot(t_ps, signal[:samples_to_plot])
+    plt.xlabel("Time (ps)")
+    plt.ylabel("Electrical Signal Power")
+    plt.title("Directly Detected WDM Signal")
+    plt.xlim(0, 1000)
+    plt.grid()
+    plt.show()
+
+
+def plot_detected_signal(signal, config: WDMConfig):
+    """Plot detected signal waveform for first 10 symbols."""
+    plt.figure(figsize=(12, 4))
+
+    # Calculate time vector in picoseconds
+    plot_symbols = 10
+    samples_to_plot = plot_symbols * config.N_samples_per_symbol
+    t = np.arange(samples_to_plot) / (config.baud_rate * config.N_samples_per_symbol)
+    t_ps = t * 1e12  # Convert to picoseconds
+
+    # Plot only first 10 symbols without normalization
+    plt.plot(t_ps, signal[:samples_to_plot])
+    plt.xlabel("Time (ps)")
+    plt.ylabel("Electrical Signal Power")
+    plt.title("Directly Detected WDM Signal")
+    plt.xlim(0, 1000)
+    plt.grid()
+    plt.show()
+
+
+def main():
     config = WDMConfig()
     fs = config.baud_rate * config.N_samples_per_symbol
     total_bw = config.channel_spacing * (config.N_channels - 1)
-    print(f"   - Total bandwidth = {total_bw/1e9:.1f} GHz")
-    print(f"   - Sampling frequency = {fs/1e9:.1f} GHz")
-
-    print("\nc) Why Nss = 64 instead of 16:")
-    print("   - Nyquist sampling theorem requires fs > 2 * signal_bandwidth")
-    print("   - With 16 samples/symbol: fs = 16 * 10 GHz = 160 GHz")
-    print("   - This is less than required 2 * 200 GHz = 400 GHz")
-    print("   - With 64 samples/symbol: fs = 640 GHz, which satisfies Nyquist")
-
-    print("\nd) Minimum Nss required:")
     min_nss = np.ceil(2 * total_bw / config.baud_rate)
-    print(f"   - Minimum Nss = ceil(2 * total_bw / Rs) = {min_nss}")
 
     # Generate and plot WDM signal
     print("\nGenerating WDM signal...")
     wdm_signal, bits = generate_wdm_signal(config)
     plot_wdm_spectrum(wdm_signal, config)
+
+    # Plot results
+    print("\nPlotting detected signal...")
+    plot_detected_signal(np.abs(wdm_signal) ** 2, config)
+
+    total_osnr_db = 10 * np.log10(config.N_channels) + config.OSNR_dB
+
+    print(fs)
+    print(total_bw)
+    print(min_nss)
+    print(f"OSNR for entire WDM signal: {total_osnr_db:.1f} dB")
 
 
 if __name__ == "__main__":
